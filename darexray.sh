@@ -69,7 +69,7 @@ unzip -d xray xray.zip
 chmod +x cloudflared-linux xray/xray
 rm -rf xray.zip
 uuid=$(cat /proc/sys/kernel/random/uuid)
-urlpath=$(echo $uuid | awk -F- '{print $1}')
+urlpath="/?ed=2560"
 port=$[$RANDOM+10000]
 if [ $protocol == 1 ]
 then
@@ -237,7 +237,7 @@ mv cloudflared-linux /opt/suoha/
 mv xray/xray /opt/suoha/
 rm -rf xray xray.zip
 uuid=$(cat /proc/sys/kernel/random/uuid)
-urlpath=$(echo $uuid | awk -F- '{print $1}')
+urlpath="/?ed=2560"
 port=$[$RANDOM+10000]
 if [ $protocol == 1 ]
 then
