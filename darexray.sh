@@ -1,5 +1,5 @@
 #!/bin/bash
-# onekey suoha
+# onekey darexray
 linux_os=("Debian" "Ubuntu" "CentOS" "Fedora" "Alpine")
 linux_update=("apt update" "apt update" "yum -y update" "yum -y update" "apk update")
 linux_install=("apt -y install" "apt -y install" "yum -y install" "yum -y install" "apk add -f")
@@ -205,7 +205,7 @@ echo -e '\n'信息已经保存在 v2ray.txt,再次查看请运行 cat v2ray.txt
 
 function installtunnel(){
 #创建主目录
-mkdir -p /opt/suoha/ >/dev/null 2>&1
+mkdir -p /opt/darexray/ >/dev/null 2>&1
 rm -rf xray cloudflared-linux xray.zip
 case "$(uname -m)" in
 	x86_64 | x64 | amd64 )
@@ -233,15 +233,15 @@ esac
 mkdir xray
 unzip -d xray xray.zip
 chmod +x cloudflared-linux xray/xray
-mv cloudflared-linux /opt/suoha/
-mv xray/xray /opt/suoha/
+mv cloudflared-linux /opt/darexray/
+mv xray/xray /opt/darexray/
 rm -rf xray xray.zip
 uuid=$(cat /proc/sys/kernel/random/uuid)
 urlpath="/?ed=2560"
 port=$[$RANDOM+10000]
 if [ $protocol == 1 ]
 then
-cat>/opt/suoha/config.json<<EOF
+cat>/opt/darexray/config.json<<EOF
 {
 	"inbounds": [
 		{
@@ -275,7 +275,7 @@ EOF
 fi
 if [ $protocol == 2 ]
 then
-cat>/opt/suoha/config.json<<EOF
+cat>/opt/darexray/config.json<<EOF
 {
 	"inbounds": [
 		{
@@ -310,9 +310,9 @@ fi
 clear
 echo 复制下面的链接,用浏览器打开并授权需要绑定的域名
 echo 在网页中授权完毕后会继续进行下一步设置
-/opt/suoha/cloudflared-linux --edge-ip-version $ips --protocol http2 tunnel login
+/opt/darexray/cloudflared-linux --edge-ip-version $ips --protocol http2 tunnel login
 clear
-/opt/suoha/cloudflared-linux --edge-ip-version $ips --protocol http2 tunnel list >argo.log 2>&1
+/opt/darexray/cloudflared-linux --edge-ip-version $ips --protocol http2 tunnel list >argo.log 2>&1
 echo -e ARGO TUNNEL当前已经绑定的服务如下'\n'
 sed 1,2d argo.log | awk '{print $2}'
 echo -e '\n'自定义一个完整二级域名,例如 xxx.example.com
@@ -331,7 +331,7 @@ name=$(echo $domain | awk -F\. '{print $1}')
 if [ $(sed 1,2d argo.log | awk '{print $2}' | grep -w $name | wc -l) == 0 ]
 then
 	echo 创建TUNNEL $name
-	/opt/suoha/cloudflared-linux --edge-ip-version $ips --protocol http2 tunnel create $name >argo.log 2>&1
+	/opt/darexray/cloudflared-linux --edge-ip-version $ips --protocol http2 tunnel create $name >argo.log 2>&1
 	echo TUNNEL $name 创建成功
 else
 	echo TUNNEL $name 已经存在
@@ -339,44 +339,44 @@ else
 	then
 		echo /root/.cloudflared/$(sed 1,2d argo.log | awk '{print $1" "$2}' | grep -w $name | awk '{print $1}').json 文件不存在
 		echo 清理TUNNEL $name
-		/opt/suoha/cloudflared-linux --edge-ip-version $ips --protocol http2 tunnel cleanup $name >argo.log 2>&1
+		/opt/darexray/cloudflared-linux --edge-ip-version $ips --protocol http2 tunnel cleanup $name >argo.log 2>&1
 		echo 删除TUNNEL $name
-		/opt/suoha/cloudflared-linux --edge-ip-version $ips --protocol http2 tunnel delete $name >argo.log 2>&1
+		/opt/darexray/cloudflared-linux --edge-ip-version $ips --protocol http2 tunnel delete $name >argo.log 2>&1
 		echo 重建TUNNEL $name
-		/opt/suoha/cloudflared-linux --edge-ip-version $ips --protocol http2 tunnel create $name >argo.log 2>&1
+		/opt/darexray/cloudflared-linux --edge-ip-version $ips --protocol http2 tunnel create $name >argo.log 2>&1
 	else
 		echo 清理TUNNEL $name
-		/opt/suoha/cloudflared-linux --edge-ip-version $ips --protocol http2 tunnel cleanup $name >argo.log 2>&1
+		/opt/darexray/cloudflared-linux --edge-ip-version $ips --protocol http2 tunnel cleanup $name >argo.log 2>&1
 	fi
 fi
 echo 绑定 TUNNEL $name 到域名 $domain
-/opt/suoha/cloudflared-linux --edge-ip-version $ips --protocol http2 tunnel route dns --overwrite-dns $name $domain >argo.log 2>&1
+/opt/darexray/cloudflared-linux --edge-ip-version $ips --protocol http2 tunnel route dns --overwrite-dns $name $domain >argo.log 2>&1
 echo $domain 绑定成功
 tunneluuid=$(cut -d= -f2 argo.log)
 if [ $protocol == 1 ]
 then
-	echo -e vmess链接已经生成, speed.cloudflare.com 可替换为CF优选IP'\n' >/opt/suoha/v2ray.txt
-	echo 'vmess://'$(echo '{"add":"speed.cloudflare.com","aid":"0","host":"'$domain'","id":"'$uuid'","net":"ws","path":"'$urlpath'","port":"443","ps":"'$(echo $isp | sed -e 's/_/ /g')'","tls":"tls","type":"none","v":"2"}' | base64 -w 0) >>/opt/suoha/v2ray.txt
-	echo -e '\n'端口 443 可改为 2053 2083 2087 2096 8443'\n' >>/opt/suoha/v2ray.txt
-	echo 'vmess://'$(echo '{"add":"speed.cloudflare.com","aid":"0","host":"'$domain'","id":"'$uuid'","net":"ws","path":"'$urlpath'","port":"80","ps":"'$(echo $isp | sed -e 's/_/ /g')'","tls":"","type":"none","v":"2"}' | base64 -w 0) >>/opt/suoha/v2ray.txt
-	echo -e '\n'端口 80 可改为 8080 8880 2052 2082 2086 2095'\n' >>/opt/suoha/v2ray.txt
-	echo 注意:如果 80 8080 8880 2052 2082 2086 2095 端口无法正常使用 >>/opt/suoha/v2ray.txt
-	echo 请前往 https://dash.cloudflare.com/ >>/opt/suoha/v2ray.txt
-	echo 检查管理面板 SSL/TLS - 边缘证书 - 始终使用HTTPS 是否处于关闭状态 >>/opt/suoha/v2ray.txt
+	echo -e vmess链接已经生成, speed.cloudflare.com 可替换为CF优选IP'\n' >/opt/darexray/v2ray.txt
+	echo 'vmess://'$(echo '{"add":"speed.cloudflare.com","aid":"0","host":"'$domain'","id":"'$uuid'","net":"ws","path":"'$urlpath'","port":"443","ps":"'$(echo $isp | sed -e 's/_/ /g')'","tls":"tls","type":"none","v":"2"}' | base64 -w 0) >>/opt/darexray/v2ray.txt
+	echo -e '\n'端口 443 可改为 2053 2083 2087 2096 8443'\n' >>/opt/darexray/v2ray.txt
+	echo 'vmess://'$(echo '{"add":"speed.cloudflare.com","aid":"0","host":"'$domain'","id":"'$uuid'","net":"ws","path":"'$urlpath'","port":"80","ps":"'$(echo $isp | sed -e 's/_/ /g')'","tls":"","type":"none","v":"2"}' | base64 -w 0) >>/opt/darexray/v2ray.txt
+	echo -e '\n'端口 80 可改为 8080 8880 2052 2082 2086 2095'\n' >>/opt/darexray/v2ray.txt
+	echo 注意:如果 80 8080 8880 2052 2082 2086 2095 端口无法正常使用 >>/opt/darexray/v2ray.txt
+	echo 请前往 https://dash.cloudflare.com/ >>/opt/darexray/v2ray.txt
+	echo 检查管理面板 SSL/TLS - 边缘证书 - 始终使用HTTPS 是否处于关闭状态 >>/opt/darexray/v2ray.txt
 fi
 if [ $protocol == 2 ]
 then
-	echo -e vless链接已经生成, speed.cloudflare.com 可替换为CF优选IP'\n' >/opt/suoha/v2ray.txt
-	echo 'vless://'$uuid'@speed.cloudflare.com:443?encryption=none&security=tls&type=ws&host='$domain'&path='$urlpath'#'$(echo $isp | sed -e 's/_/%20/g' -e 's/,/%2C/g')'_tls' >>/opt/suoha/v2ray.txt
-	echo -e '\n'端口 443 可改为 2053 2083 2087 2096 8443'\n' >>/opt/suoha/v2ray.txt
-	echo 'vless://'$uuid'@speed.cloudflare.com:80?encryption=none&security=none&type=ws&host='$domain'&path='$urlpath'#'$(echo $isp | sed -e 's/_/%20/g' -e 's/,/%2C/g')'' >>/opt/suoha/v2ray.txt
-	echo -e '\n'端口 80 可改为 8080 8880 2052 2082 2086 2095'\n' >>/opt/suoha/v2ray.txt
-	echo 注意:如果 80 8080 8880 2052 2082 2086 2095 端口无法正常使用 >>/opt/suoha/v2ray.txt
-	echo 请前往 https://dash.cloudflare.com/ >>/opt/suoha/v2ray.txt
-	echo 检查管理面板 SSL/TLS - 边缘证书 - 始终使用HTTPS 是否处于关闭状态 >>/opt/suoha/v2ray.txt
+	echo -e vless链接已经生成, speed.cloudflare.com 可替换为CF优选IP'\n' >/opt/darexray/v2ray.txt
+	echo 'vless://'$uuid'@speed.cloudflare.com:443?encryption=none&security=tls&type=ws&host='$domain'&path='$urlpath'#'$(echo $isp | sed -e 's/_/%20/g' -e 's/,/%2C/g')'_tls' >>/opt/darexray/v2ray.txt
+	echo -e '\n'端口 443 可改为 2053 2083 2087 2096 8443'\n' >>/opt/darexray/v2ray.txt
+	echo 'vless://'$uuid'@speed.cloudflare.com:80?encryption=none&security=none&type=ws&host='$domain'&path='$urlpath'#'$(echo $isp | sed -e 's/_/%20/g' -e 's/,/%2C/g')'' >>/opt/darexray/v2ray.txt
+	echo -e '\n'端口 80 可改为 8080 8880 2052 2082 2086 2095'\n' >>/opt/darexray/v2ray.txt
+	echo 注意:如果 80 8080 8880 2052 2082 2086 2095 端口无法正常使用 >>/opt/darexray/v2ray.txt
+	echo 请前往 https://dash.cloudflare.com/ >>/opt/darexray/v2ray.txt
+	echo 检查管理面板 SSL/TLS - 边缘证书 - 始终使用HTTPS 是否处于关闭状态 >>/opt/darexray/v2ray.txt
 fi
 rm -rf argo.log
-cat>/opt/suoha/config.yaml<<EOF
+cat>/opt/darexray/config.yaml<<EOF
 tunnel: $tunneluuid
 credentials-file: /root/.cloudflared/$tunneluuid.json
 
@@ -387,10 +387,10 @@ EOF
 if [ $(grep -i PRETTY_NAME /etc/os-release | cut -d \" -f2 | awk '{print $1}') == "Alpine" ]
 then
 cat>/etc/local.d/cloudflared.start<<EOF
-/opt/suoha/cloudflared-linux --edge-ip-version $ips --protocol http2 tunnel --config /opt/suoha/config.yaml run $name &
+/opt/darexray/cloudflared-linux --edge-ip-version $ips --protocol http2 tunnel --config /opt/darexray/config.yaml run $name &
 EOF
 cat>/etc/local.d/xray.start<<EOF
-/opt/suoha/xray run -config /opt/suoha/config.json &
+/opt/darexray/xray run -config /opt/darexray/config.json &
 EOF
 chmod +x /etc/local.d/cloudflared.start /etc/local.d/xray.start
 rc-update add local
@@ -406,7 +406,7 @@ After=network.target
 [Service]
 TimeoutStartSec=0
 Type=simple
-ExecStart=/opt/suoha/cloudflared-linux --edge-ip-version $ips --protocol http2 tunnel --config /opt/suoha/config.yaml run $name
+ExecStart=/opt/darexray/cloudflared-linux --edge-ip-version $ips --protocol http2 tunnel --config /opt/darexray/config.yaml run $name
 Restart=on-failure
 RestartSec=5s
 
@@ -421,7 +421,7 @@ After=network.target
 [Service]
 TimeoutStartSec=0
 Type=simple
-ExecStart=/opt/suoha/xray run -config /opt/suoha/config.json
+ExecStart=/opt/darexray/xray run -config /opt/darexray/config.json
 Restart=on-failure
 RestartSec=5s
 
@@ -437,7 +437,7 @@ fi
 if [ $(grep -i PRETTY_NAME /etc/os-release | cut -d \" -f2 | awk '{print $1}') == "Alpine" ]
 then
 #创建命令链接
-cat>/opt/suoha/suoha.sh<<EOF
+cat>/opt/darexray/darexray.sh<<EOF
 #!/bin/bash
 while true
 do
@@ -473,7 +473,7 @@ then
 	while true
 	do
 		echo ARGO TUNNEL当前已经绑定的服务如下
-		/opt/suoha/cloudflared-linux tunnel list
+		/opt/darexray/cloudflared-linux tunnel list
 		echo 1.删除TUNNEL
 		echo 0.退出
 		read -p "请选择菜单(默认0): " tunneladmin
@@ -485,9 +485,9 @@ then
 		then
 			read -p "请输入要删除的TUNNEL NAME: " tunnelname
 			echo 断开TUNNEL \$tunnelname
-			/opt/suoha/cloudflared-linux tunnel cleanup \$tunnelname
+			/opt/darexray/cloudflared-linux tunnel cleanup \$tunnelname
 			echo 删除TUNNEL \$tunnelname
-			/opt/suoha/cloudflared-linux tunnel delete \$tunnelname
+			/opt/darexray/cloudflared-linux tunnel delete \$tunnelname
 		else
 			break
 		fi
@@ -518,7 +518,7 @@ elif [ \$menu == 5 ]
 then
 	kill -9 \$(ps -ef | grep xray | grep -v grep | awk '{print \$1}') >/dev/null 2>&1
 	kill -9 \$(ps -ef | grep cloudflared-linux | grep -v grep | awk '{print \$1}') >/dev/null 2>&1
-	rm -rf /opt/suoha /etc/local.d/cloudflared.start /etc/local.d/xray.start /usr/bin/suoha ~/.cloudflared
+	rm -rf /opt/darexray /etc/local.d/cloudflared.start /etc/local.d/xray.start /usr/bin/darexray ~/.cloudflared
 	echo 所有服务都卸载完成
 	echo 彻底删除授权记录
 	echo 请访问 https://dash.cloudflare.com/profile/api-tokens
@@ -527,7 +527,7 @@ then
 elif [ \$menu == 6 ]
 then
 	clear
-	cat /opt/suoha/v2ray.txt
+	cat /opt/darexray/v2ray.txt
 elif [ \$menu == 0 ]
 then
 	echo 退出成功
@@ -537,7 +537,7 @@ done
 EOF
 else
 #创建命令链接
-cat>/opt/suoha/suoha.sh<<EOF
+cat>/opt/darexray/darexray.sh<<EOF
 #!/bin/bash
 clear
 while true
@@ -562,7 +562,7 @@ then
 	while true
 	do
 		echo ARGO TUNNEL当前已经绑定的服务如下
-		/opt/suoha/cloudflared-linux tunnel list
+		/opt/darexray/cloudflared-linux tunnel list
 		echo 1.删除TUNNEL
 		echo 0.退出
 		read -p "请选择菜单(默认0): " tunneladmin
@@ -574,9 +574,9 @@ then
 		then
 			read -p "请输入要删除的TUNNEL NAME: " tunnelname
 			echo 断开TUNNEL \$tunnelname
-			/opt/suoha/cloudflared-linux tunnel cleanup \$tunnelname
+			/opt/darexray/cloudflared-linux tunnel cleanup \$tunnelname
 			echo 删除TUNNEL \$tunnelname
-			/opt/suoha/cloudflared-linux tunnel delete \$tunnelname
+			/opt/darexray/cloudflared-linux tunnel delete \$tunnelname
 		else
 			break
 		fi
@@ -604,7 +604,7 @@ then
 	systemctl disable xray.service
 	kill -9 \$(ps -ef | grep xray | grep -v grep | awk '{print \$2}') >/dev/null 2>&1
 	kill -9 \$(ps -ef | grep cloudflared-linux | grep -v grep | awk '{print \$2}') >/dev/null 2>&1
-	rm -rf /opt/suoha /lib/systemd/system/cloudflared.service /lib/systemd/system/xray.service /usr/bin/suoha ~/.cloudflared
+	rm -rf /opt/darexray /lib/systemd/system/cloudflared.service /lib/systemd/system/xray.service /usr/bin/darexray ~/.cloudflared
 	systemctl --system daemon-reload
 	echo 所有服务都卸载完成
 	echo 彻底删除授权记录
@@ -614,7 +614,7 @@ then
 elif [ \$menu == 6 ]
 then
 	clear
-	cat /opt/suoha/v2ray.txt
+	cat /opt/darexray/v2ray.txt
 elif [ \$menu == 0 ]
 then
 	echo 退出成功
@@ -623,8 +623,8 @@ fi
 done
 EOF
 fi
-chmod +x /opt/suoha/suoha.sh
-ln -sf /opt/suoha/suoha.sh /usr/bin/suoha
+chmod +x /opt/darexray/darexray.sh
+ln -sf /opt/darexray/darexray.sh /usr/bin/darexray
 }
 
 clear
@@ -706,7 +706,7 @@ then
 	then
 		kill -9 $(ps -ef | grep xray | grep -v grep | awk '{print $1}') >/dev/null 2>&1
 		kill -9 $(ps -ef | grep cloudflared-linux | grep -v grep | awk '{print $1}') >/dev/null 2>&1
-		rm -rf /opt/suoha /lib/systemd/system/cloudflared.service /lib/systemd/system/xray.service /usr/bin/suoha
+		rm -rf /opt/darexray /lib/systemd/system/cloudflared.service /lib/systemd/system/xray.service /usr/bin/darexray
 	else
 		systemctl stop cloudflared.service
 		systemctl stop xray.service
@@ -714,19 +714,19 @@ then
 		systemctl disable xray.service
 		kill -9 $(ps -ef | grep xray | grep -v grep | awk '{print $2}') >/dev/null 2>&1
 		kill -9 $(ps -ef | grep cloudflared-linux | grep -v grep | awk '{print $2}') >/dev/null 2>&1
-		rm -rf /opt/suoha /lib/systemd/system/cloudflared.service /lib/systemd/system/xray.service /usr/bin/suoha
+		rm -rf /opt/darexray /lib/systemd/system/cloudflared.service /lib/systemd/system/xray.service /usr/bin/darexray
 		systemctl --system daemon-reload
 	fi
 	installtunnel
-	cat /opt/suoha/v2ray.txt
-	echo 服务安装完成,管理服务请运行命令 suoha
+	cat /opt/darexray/v2ray.txt
+	echo 服务安装完成,管理服务请运行命令 darexray
 elif [ $mode == 3 ]
 then
 	if [ $(grep -i PRETTY_NAME /etc/os-release | cut -d \" -f2 | awk '{print $1}') == "Alpine" ]
 	then
 		kill -9 $(ps -ef | grep xray | grep -v grep | awk '{print $1}') >/dev/null 2>&1
 		kill -9 $(ps -ef | grep cloudflared-linux | grep -v grep | awk '{print $1}') >/dev/null 2>&1
-		rm -rf /opt/suoha /lib/systemd/system/cloudflared.service /lib/systemd/system/xray.service /usr/bin/suoha
+		rm -rf /opt/darexray /lib/systemd/system/cloudflared.service /lib/systemd/system/xray.service /usr/bin/darexray
 	else
 		systemctl stop cloudflared.service
 		systemctl stop xray.service
@@ -734,7 +734,7 @@ then
 		systemctl disable xray.service
 		kill -9 $(ps -ef | grep xray | grep -v grep | awk '{print $2}') >/dev/null 2>&1
 		kill -9 $(ps -ef | grep cloudflared-linux | grep -v grep | awk '{print $2}') >/dev/null 2>&1
-		rm -rf /opt/suoha /lib/systemd/system/cloudflared.service /lib/systemd/system/xray.service /usr/bin/suoha ~/.cloudflared
+		rm -rf /opt/darexray /lib/systemd/system/cloudflared.service /lib/systemd/system/xray.service /usr/bin/darexray ~/.cloudflared
 		systemctl --system daemon-reload
 	fi
 	clear
