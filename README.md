@@ -1,7 +1,7 @@
 
 ### darexray
 ```
-curl -sSL https://raw.githubusercontent.com/sureos/unix/main/darexray.sh -o darexray.sh && bash darexray.sh
+wget https://raw.githubusercontent.com/sureos/unix/main/suoha.sh -O suoha.sh && bash suoha.sh
 ```
       
 ### wgdare
