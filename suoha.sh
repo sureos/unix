@@ -668,7 +668,7 @@ then
 		echo 请输入正确的argo连接模式
 		exit
 	fi
-	isp=$(curl -$ips -s https://lo.cafe/meta | awk -F\" '{print $26"-"$18"-"$30}' | sed -e 's/ /_/g')
+	isp=$(curl -$ips -s https://speed.cloudflare.com/meta | awk -F\" '{print $26"-"$18"-"$30}' | sed -e 's/ /_/g')
 	if [ $(grep -i PRETTY_NAME /etc/os-release | cut -d \" -f2 | awk '{print $1}') == "Alpine" ]
 	then
 		kill -9 $(ps -ef | grep xray | grep -v grep | awk '{print $1}') >/dev/null 2>&1
@@ -701,7 +701,7 @@ then
 		echo 请输入正确的argo连接模式
 		exit
 	fi
-	isp=$(curl -$ips -s https://lo.cafe/meta | awk -F\" '{print $26"-"$18"-"$30}' | sed -e 's/ /_/g')
+	isp=$(curl -$ips -s https://speed.cloudflare.com/meta | awk -F\" '{print $26"-"$18"-"$30}' | sed -e 's/ /_/g')
 	if [ $(grep -i PRETTY_NAME /etc/os-release | cut -d \" -f2 | awk '{print $1}') == "Alpine" ]
 	then
 		kill -9 $(ps -ef | grep xray | grep -v grep | awk '{print $1}') >/dev/null 2>&1
