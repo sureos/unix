@@ -53,9 +53,41 @@ fi
 
 echo "依赖检查完成！"
 
+# 网络连通性检查函数
+function check_network() {
+	echo "检查网络连通性..."
+	
+	# 检查 GitHub 连接
+	if curl -s --max-time 10 https://api.github.com >/dev/null 2>&1; then
+		echo "✓ GitHub 连接正常"
+	else
+		echo "✗ GitHub 连接失败，可能影响下载"
+		echo "请检查网络连接或使用代理"
+		return 1
+	fi
+	
+	# 检查 Cloudflare 连接
+	if curl -s --max-time 10 https://1.1.1.1 >/dev/null 2>&1; then
+		echo "✓ Cloudflare 连接正常"
+	else
+		echo "✗ Cloudflare 连接失败，可能影响隧道功能"
+	fi
+	
+	return 0
+}
+
 # 快速隧道模式函数 (临时模式)
 function quicktunnel(){
 	echo "=== 启动快速隧道模式 ==="
+	
+	# 检查网络连通性
+	if ! check_network; then
+		read -p "网络连接异常，是否继续？(y/N): " continue_anyway
+		if [ "$continue_anyway" != "y" ] && [ "$continue_anyway" != "Y" ]; then
+			echo "已取消操作"
+			exit 1
+		fi
+	fi
 	
 	# 清理旧文件
 	rm -rf sing-box cloudflared-linux sing-box.tar.gz argo.log config.json
@@ -64,39 +96,139 @@ function quicktunnel(){
 	arch=$(uname -m)
 	echo "检测到系统架构: $arch"
 	
+	# 下载重试函数
+	download_with_retry() {
+		local url=$1
+		local output=$2
+		local max_retries=3
+		local retry=0
+		
+		while [ $retry -lt $max_retries ]; do
+			echo "尝试下载 $output (第 $((retry+1)) 次)..."
+			
+			# 使用 curl 下载并检查结果
+			if curl -L --fail --connect-timeout 30 --max-time 300 "$url" -o "$output"; then
+				echo "✓ $output 下载成功"
+				
+				# 验证文件是否为有效的压缩文件
+				if file "$output" | grep -q "gzip compressed"; then
+					echo "✓ $output 文件格式验证通过"
+					return 0
+				else
+					echo "✗ $output 不是有效的 gzip 文件，重试..."
+					rm -f "$output"
+				fi
+			else
+				echo "✗ $output 下载失败，重试..."
+				rm -f "$output"
+			fi
+			
+			retry=$((retry + 1))
+			sleep 2
+		done
+		
+		echo "错误: $output 下载失败，已重试 $max_retries 次"
+		return 1
+	}
+	
 	case "$arch" in
 		x86_64 | x64 | amd64 )
 			echo "下载 sing-box x86_64 版本..."
-			curl -L https://github.com/SagerNet/sing-box/releases/latest/download/sing-box-linux-amd64.tar.gz -o sing-box.tar.gz
-			curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared-linux
+			download_with_retry "https://github.com/SagerNet/sing-box/releases/latest/download/sing-box-linux-amd64.tar.gz" "sing-box.tar.gz" || exit 1
+			download_with_retry "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64" "cloudflared-linux" || exit 1
 			;;
 		i386 | i686 )
 			echo "下载 sing-box i386 版本..."
-			curl -L https://github.com/SagerNet/sing-box/releases/latest/download/sing-box-linux-386.tar.gz -o sing-box.tar.gz
-			curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-386 -o cloudflared-linux
+			download_with_retry "https://github.com/SagerNet/sing-box/releases/latest/download/sing-box-linux-386.tar.gz" "sing-box.tar.gz" || exit 1
+			download_with_retry "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-386" "cloudflared-linux" || exit 1
 			;;
 		armv8 | arm64 | aarch64 )
 			echo "下载 sing-box ARM64 版本..."
-			curl -L https://github.com/SagerNet/sing-box/releases/latest/download/sing-box-linux-arm64.tar.gz -o sing-box.tar.gz
-			curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64 -o cloudflared-linux
+			download_with_retry "https://github.com/SagerNet/sing-box/releases/latest/download/sing-box-linux-arm64.tar.gz" "sing-box.tar.gz" || exit 1
+			download_with_retry "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64" "cloudflared-linux" || exit 1
 			;;
 		armv7l | armv7 )
 			echo "下载 sing-box ARMv7 版本..."
-			curl -L https://github.com/SagerNet/sing-box/releases/latest/download/sing-box-linux-armv7.tar.gz -o sing-box.tar.gz
-			curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm -o cloudflared-linux
+			download_with_retry "https://github.com/SagerNet/sing-box/releases/latest/download/sing-box-linux-armv7.tar.gz" "sing-box.tar.gz" || exit 1
+			download_with_retry "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm" "cloudflared-linux" || exit 1
 			;;
 		* )
 			echo "错误: 当前架构 $arch 不支持"
 			exit 1
 			;;
 	esac
+	esac
 	
 	# 解压和设置权限
 	echo "解压程序文件..."
-	tar -xzf sing-box.tar.gz
-	mv sing-box-*/sing-box ./
+	
+	# 检查文件是否存在
+	if [ ! -f "sing-box.tar.gz" ]; then
+		echo "错误: sing-box.tar.gz 文件不存在"
+		exit 1
+	fi
+	
+	if [ ! -f "cloudflared-linux" ]; then
+		echo "错误: cloudflared-linux 文件不存在"
+		exit 1
+	fi
+	
+	# 验证 tar.gz 文件格式
+	if ! tar -tzf sing-box.tar.gz >/dev/null 2>&1; then
+		echo "错误: sing-box.tar.gz 文件损坏或格式错误"
+		echo "文件信息:"
+		file sing-box.tar.gz
+		ls -la sing-box.tar.gz
+		exit 1
+	fi
+	
+	# 解压 tar.gz 文件
+	if tar -xzf sing-box.tar.gz; then
+		echo "✓ sing-box.tar.gz 解压成功"
+	else
+		echo "错误: 解压 sing-box.tar.gz 失败"
+		exit 1
+	fi
+	
+	# 查找 sing-box 可执行文件
+	sing_box_binary=$(find . -name "sing-box" -type f -executable 2>/dev/null | head -1)
+	if [ -z "$sing_box_binary" ]; then
+		# 如果找不到可执行文件，尝试查找任意 sing-box 文件
+		sing_box_binary=$(find . -name "sing-box" -type f 2>/dev/null | head -1)
+		if [ -z "$sing_box_binary" ]; then
+			echo "错误: 未找到 sing-box 可执行文件"
+			echo "解压后的文件列表:"
+			find . -type f -name "*sing-box*" 2>/dev/null || echo "未找到任何 sing-box 相关文件"
+			exit 1
+		fi
+	fi
+	
+	# 移动 sing-box 文件
+	if mv "$sing_box_binary" ./sing-box; then
+		echo "✓ sing-box 文件移动成功"
+	else
+		echo "错误: 移动 sing-box 文件失败"
+		exit 1
+	fi
+	
+	# 设置权限
 	chmod +x cloudflared-linux sing-box
-	rm -rf sing-box.tar.gz sing-box-*
+	
+	# 清理临时文件
+	rm -rf sing-box.tar.gz sing-box-* *.tar.gz
+	
+	# 验证文件是否可执行
+	if [ ! -x "./sing-box" ]; then
+		echo "错误: sing-box 文件不可执行"
+		exit 1
+	fi
+	
+	if [ ! -x "./cloudflared-linux" ]; then
+		echo "错误: cloudflared-linux 文件不可执行"
+		exit 1
+	fi
+	
+	echo "✓ 所有文件准备就绪"
 	
 	# 生成配置参数
 	uuid=$(cat /proc/sys/kernel/random/uuid)
@@ -358,6 +490,15 @@ function get_protocol_name(){
 function installtunnel(){
 	echo "=== 启动安装服务模式 ==="
 	
+	# 检查网络连通性
+	if ! check_network; then
+		read -p "网络连接异常，是否继续？(y/N): " continue_anyway
+		if [ "$continue_anyway" != "y" ] && [ "$continue_anyway" != "Y" ]; then
+			echo "已取消操作"
+			exit 1
+		fi
+	fi
+	
 	# 创建主目录
 	mkdir -p /opt/singbox/ >/dev/null 2>&1
 	
@@ -370,20 +511,20 @@ function installtunnel(){
 	
 	case "$arch" in
 		x86_64 | x64 | amd64 )
-			curl -L https://github.com/SagerNet/sing-box/releases/latest/download/sing-box-linux-amd64.tar.gz -o sing-box.tar.gz
-			curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared-linux
+			download_with_retry "https://github.com/SagerNet/sing-box/releases/latest/download/sing-box-linux-amd64.tar.gz" "sing-box.tar.gz" || exit 1
+			download_with_retry "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64" "cloudflared-linux" || exit 1
 			;;
 		i386 | i686 )
-			curl -L https://github.com/SagerNet/sing-box/releases/latest/download/sing-box-linux-386.tar.gz -o sing-box.tar.gz
-			curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-386 -o cloudflared-linux
+			download_with_retry "https://github.com/SagerNet/sing-box/releases/latest/download/sing-box-linux-386.tar.gz" "sing-box.tar.gz" || exit 1
+			download_with_retry "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-386" "cloudflared-linux" || exit 1
 			;;
 		armv8 | arm64 | aarch64 )
-			curl -L https://github.com/SagerNet/sing-box/releases/latest/download/sing-box-linux-arm64.tar.gz -o sing-box.tar.gz
-			curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64 -o cloudflared-linux
+			download_with_retry "https://github.com/SagerNet/sing-box/releases/latest/download/sing-box-linux-arm64.tar.gz" "sing-box.tar.gz" || exit 1
+			download_with_retry "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64" "cloudflared-linux" || exit 1
 			;;
 		armv7l | armv7 )
-			curl -L https://github.com/SagerNet/sing-box/releases/latest/download/sing-box-linux-armv7.tar.gz -o sing-box.tar.gz
-			curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm -o cloudflared-linux
+			download_with_retry "https://github.com/SagerNet/sing-box/releases/latest/download/sing-box-linux-armv7.tar.gz" "sing-box.tar.gz" || exit 1
+			download_with_retry "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm" "cloudflared-linux" || exit 1
 			;;
 		* )
 			echo "错误: 当前架构 $arch 不支持"
@@ -392,8 +533,29 @@ function installtunnel(){
 	esac
 	
 	# 解压和移动文件
-	tar -xzf sing-box.tar.gz
-	mv sing-box-*/sing-box /opt/singbox/
+	echo "解压程序文件..."
+	
+	# 验证和解压 tar.gz 文件
+	if ! tar -tzf sing-box.tar.gz >/dev/null 2>&1; then
+		echo "错误: sing-box.tar.gz 文件损坏或格式错误"
+		exit 1
+	fi
+	
+	if tar -xzf sing-box.tar.gz; then
+		echo "✓ sing-box.tar.gz 解压成功"
+	else
+		echo "错误: 解压 sing-box.tar.gz 失败"
+		exit 1
+	fi
+	
+	# 移动文件到目标目录
+	sing_box_binary=$(find . -name "sing-box" -type f 2>/dev/null | head -1)
+	if [ -z "$sing_box_binary" ]; then
+		echo "错误: 未找到 sing-box 可执行文件"
+		exit 1
+	fi
+	
+	mv "$sing_box_binary" /opt/singbox/
 	mv cloudflared-linux /opt/singbox/
 	chmod +x /opt/singbox/sing-box /opt/singbox/cloudflared-linux
 	rm -rf sing-box.tar.gz sing-box-*
