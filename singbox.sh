@@ -157,7 +157,6 @@ function quicktunnel(){
 			exit 1
 			;;
 	esac
-	esac
 	
 	# 解压和设置权限
 	echo "解压程序文件..."
