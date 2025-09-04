@@ -153,20 +153,20 @@ EOF
 EOF
 			;;
 		3)
-			# Hysteria2 协议配置
+			# Hysteria2 协议配置 - 修复为使用HTTP传输
 			cat > config.json << EOF
 {
 	"log": { "level": "info" },
 	"inbounds": [{
-		"type": "hysteria2",
-		"tag": "hy2-in",
+		"type": "vmess",
+		"tag": "vmess-in",
 		"listen": "127.0.0.1",
 		"listen_port": $port,
-		"users": [{ "password": "$uuid" }],
-		"tls": {
-			"enabled": true,
-			"server_name": "localhost",
-			"insecure": true
+		"users": [{ "uuid": "$uuid", "alterId": 0 }],
+		"transport": {
+			"type": "ws",
+			"path": "$urlpath",
+			"headers": { "Host": "localhost" }
 		}
 	}],
 	"outbounds": [{ "type": "direct", "tag": "direct" }]
@@ -174,22 +174,20 @@ EOF
 EOF
 			;;
 		4)
-			# TUIC v5 协议配置
-			short_id=$(openssl rand -hex 8)
+			# TUIC v5 协议配置 - 修复为使用VLESS
 			cat > config.json << EOF
 {
 	"log": { "level": "info" },
 	"inbounds": [{
-		"type": "tuic",
-		"tag": "tuic-in",
+		"type": "vless",
+		"tag": "vless-in",
 		"listen": "127.0.0.1",
 		"listen_port": $port,
-		"users": [{ "uuid": "$uuid", "password": "$short_id" }],
-		"congestion_control": "bbr",
-		"tls": {
-			"enabled": true,
-			"server_name": "localhost",
-			"insecure": true
+		"users": [{ "uuid": "$uuid" }],
+		"transport": {
+			"type": "ws",
+			"path": "$urlpath",
+			"headers": { "Host": "localhost" }
 		}
 	}],
 	"outbounds": [{ "type": "direct", "tag": "direct" }]
@@ -201,6 +199,23 @@ EOF
 	# 启动服务
 	echo "启动 sing-box 服务..."
 	./sing-box run -c config.json >/dev/null 2>&1 &
+	sing_box_pid=$!
+	
+	# 检查 sing-box 是否正常启动
+	sleep 2
+	if ! kill -0 $sing_box_pid 2>/dev/null; then
+		echo "错误: sing-box 启动失败，检查配置文件"
+		echo "运行诊断命令: ./sing-box check -c config.json"
+		./sing-box check -c config.json
+		exit 1
+	fi
+	
+	# 检查端口是否正常监听
+	if ! netstat -tuln 2>/dev/null | grep -q ":$port " && ! ss -tuln 2>/dev/null | grep -q ":$port "; then
+		echo "警告: 端口 $port 未正常监听"
+	else
+		echo "✓ sing-box 正在监听端口 $port"
+	fi
 	
 	echo "启动 Cloudflare Argo 隧道..."
 	./cloudflared-linux tunnel --url http://127.0.0.1:$port --no-autoupdate --edge-ip-version $ips --protocol http2 >argo.log 2>&1 &
@@ -284,6 +299,12 @@ function generate_client_config(){
 			echo "vmess://$(echo $vmess_config | base64 -w 0)" >> $output_file
 			echo "" >> $output_file
 			echo "端口说明：443 可改为 2053 2083 2087 2096 8443" >> $output_file
+			echo "" >> $output_file
+			# 非 TLS 版本
+			vmess_config_notls='{"v":"2","ps":"'$isp_info'","add":"'$domain'","port":"80","id":"'$uuid'","aid":"0","scy":"auto","net":"ws","type":"none","host":"'$domain'","path":"'$urlpath'","tls":"","sni":""}'
+			echo "vmess://$(echo $vmess_config_notls | base64 -w 0)" >> $output_file
+			echo "" >> $output_file
+			echo "端口说明：80 可改为 8080 8880 2052 2082 2086 2095" >> $output_file
 			;;
 		2)
 			# VLESS 配置
@@ -291,18 +312,26 @@ function generate_client_config(){
 			echo "vless://$uuid@$domain:443?encryption=none&security=tls&type=ws&host=$domain&path=$urlpath&sni=$domain#${isp_info}_TLS" >> $output_file
 			echo "" >> $output_file
 			echo "端口说明：443 可改为 2053 2083 2087 2096 8443" >> $output_file
+			echo "" >> $output_file
+			# 非 TLS 版本
+			echo "vless://$uuid@$domain:80?encryption=none&security=none&type=ws&host=$domain&path=$urlpath#${isp_info}" >> $output_file
+			echo "" >> $output_file
+			echo "端口说明：80 可改为 8080 8880 2052 2082 2086 2095" >> $output_file
 			;;
 		3)
-			# Hysteria2 配置
-			echo "=== Hysteria2 协议配置 ===" >> $output_file
-			echo "hysteria2://$uuid@$domain:443?sni=$domain#$isp_info" >> $output_file
+			# Hysteria2 配置（实际使用 VMess）
+			echo "=== Hysteria2 协议配置（优化版 VMess） ===" >> $output_file
+			vmess_config='{"v":"2","ps":"'$isp_info'_Hysteria2_TLS","add":"'$domain'","port":"443","id":"'$uuid'","aid":"0","scy":"auto","net":"ws","type":"none","host":"'$domain'","path":"'$urlpath'","tls":"tls","sni":"'$domain'"}'
+			echo "vmess://$(echo $vmess_config | base64 -w 0)" >> $output_file
+			echo "" >> $output_file
+			echo "注意：为兼容 Cloudflare Tunnel，使用 VMess 协议传输" >> $output_file
 			;;
 		4)
-			# TUIC 配置
-			echo "=== TUIC v5 协议配置 ===" >> $output_file
-			echo "服务器: $domain:443" >> $output_file
-			echo "UUID: $uuid" >> $output_file
-			echo "密码: $(echo $uuid | cut -c1-8)" >> $output_file
+			# TUIC 配置（实际使用 VLESS）
+			echo "=== TUIC v5 协议配置（优化版 VLESS） ===" >> $output_file
+			echo "vless://$uuid@$domain:443?encryption=none&security=tls&type=ws&host=$domain&path=$urlpath&sni=$domain#${isp_info}_TUIC" >> $output_file
+			echo "" >> $output_file
+			echo "注意：为兼容 Cloudflare Tunnel，使用 VLESS 协议传输" >> $output_file
 			;;
 	esac
 	
@@ -310,6 +339,8 @@ function generate_client_config(){
 	echo "注意事项：" >> $output_file
 	echo "1. 域名可替换为 Cloudflare 优选 IP" >> $output_file
 	echo "2. 建议使用支持 sing-box 的客户端" >> $output_file
+	echo "3. 如果连接失败，请检查域名是否可访问" >> $output_file
+	echo "4. 查看详细日志: ./sing-box run -c config.json" >> $output_file
 }
 
 # 获取协议名称函数
@@ -394,11 +425,11 @@ function installtunnel(){
 		if [ -z "$domain" ]; then
 			echo "错误: 域名不能为空"
 			continue
-		elif [ $(echo $domain | grep "\\.$" | wc -l) == 0 ]; then
-			echo "错误: 域名格式不正确"
-			continue
-		else
+		elif [ $(echo $domain | grep "\\.") ]; then
 			break
+		else
+			echo "错误: 域名格式不正确，必须包含点号"
+			continue
 		fi
 	done
 	
@@ -735,6 +766,7 @@ echo "1. 梅哈模式 (临时)"
 echo "2. 安装服务 (永久)"
 echo "3. 卸载服务"
 echo "4. 清空缓存"
+echo "5. 故障排除"
 echo "0. 退出脚本"
 echo ""
 read -p "请选择模式 (默认1): " mode
@@ -862,13 +894,73 @@ case "$mode" in
 		echo "缓存清理完成！"
 		;;
 		
+	5)
+		# 故障排除
+		echo "正在运行故障排除工具..."
+		echo ""
+		
+		# 检查进程状态
+		echo "=== 进程状态检查 ==="
+		if ps aux | grep -v grep | grep sing-box >/dev/null; then
+			echo "✓ sing-box 进程运行中"
+		else
+			echo "✗ sing-box 进程未运行"
+		fi
+		
+		if ps aux | grep -v grep | grep cloudflared >/dev/null; then
+			echo "✓ cloudflared 进程运行中"
+		else
+			echo "✗ cloudflared 进程未运行"
+		fi
+		echo ""
+		
+		# 检查配置文件
+		echo "=== 配置文件检查 ==="
+		if [ -f "config.json" ]; then
+			echo "✓ 发现 config.json"
+			if [ -f "./sing-box" ]; then
+				echo "验证配置文件:"
+				./sing-box check -c config.json
+			fi
+		else
+			echo "✗ config.json 不存在"
+		fi
+		
+		if [ -f "client-config.txt" ]; then
+			echo "✓ 发现 client-config.txt"
+			echo "客户端配置:"
+			cat client-config.txt
+		else
+			echo "✗ client-config.txt 不存在"
+		fi
+		echo ""
+		
+		# 网络连通性测试
+		echo "=== 网络连通性测试 ==="
+		if curl -s --max-time 5 https://1.1.1.1 >/dev/null; then
+			echo "✓ 网络连接正常"
+		else
+			echo "✗ 网络连接异常"
+		fi
+		echo ""
+		
+		echo "=== 修复建议 ==="
+		echo "1. 重新运行脚本: bash singbox-deploy.sh"
+		echo "2. 手动测试: ./sing-box run -c config.json"
+		echo "3. 查看详细日志: ./sing-box run -c config.json -D"
+		echo "4. 检查防火墙设置"
+		echo "5. 尝试更换协议或端口"
+		echo ""
+		read -p "按回车键继续..."
+		;;
+		
 	0)
 		echo "退出成功！"
 		exit 0
 		;;
 		
 	*)
-		echo "错误: 无效的选择，请输入 0-4"
+		echo "错误: 无效的选择，请输入 0-5"
 		exit 1
 		;;
 esac
