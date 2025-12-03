@@ -1,5 +1,5 @@
 #!/bin/bash
-# onekey ech
+# suoha ech
 linux_os=("Debian" "Ubuntu" "CentOS" "Fedora" "Alpine")
 linux_update=("apt update" "apt update" "yum -y update" "yum -y update" "apk update")
 linux_install=("apt -y install" "apt -y install" "yum -y install" "yum -y install" "apk add -f")
@@ -33,9 +33,9 @@ fi
 function quicktunnel(){
 case "$(uname -m)" in
 	x86_64 | x64 | amd64 )
-	if [ ! -f "ech-server-linux" ]
+	if [ ! -f "ech-tunnel-linux" ]
 	then
-	curl -L https://www.baipiao.eu.org/ech/ech-server-linux-amd64 -o ech-server-linux
+	curl -L https://www.baipiao.eu.org/ech/ech-tunnel-linux-amd64 -o ech-tunnel-linux
 	fi
 	if [ ! -f "opera-linux" ]
 	then
@@ -47,9 +47,9 @@ case "$(uname -m)" in
 	fi
 	;;
 	i386 | i686 )
-	if [ ! -f "ech-server-linux" ]
+	if [ ! -f "ech-tunnel-linux" ]
 	then
-	curl -L https://www.baipiao.eu.org/ech/ech-server-linux-386 -o ech-server-linux
+	curl -L https://www.baipiao.eu.org/ech/ech-tunnel-linux-386 -o ech-tunnel-linux
 	fi
 	if [ ! -f "opera-linux" ]
 	then
@@ -61,9 +61,9 @@ case "$(uname -m)" in
 	fi
 	;;
 	armv8 | arm64 | aarch64 )
-	if [ ! -f "ech-server-linux" ]
+	if [ ! -f "ech-tunnel-linux" ]
 	then
-	curl -L https://www.baipiao.eu.org/ech/ech-server-linux-arm64 -o ech-server-linux
+	curl -L https://www.baipiao.eu.org/ech/ech-tunnel-linux-arm64 -o ech-tunnel-linux
 	fi
 	if [ ! -f "opera-linux" ]
 	then
@@ -79,7 +79,7 @@ case "$(uname -m)" in
 	exit
 	;;
 esac
-chmod +x cloudflared-linux ech-server-linux opera-linux
+chmod +x cloudflared-linux ech-tunnel-linux opera-linux
 if [ "$opera" = "1" ]
 then
 	operaport=$(get_free_port)
@@ -91,16 +91,16 @@ if [ -z "$token" ]
 then
 	if [ "$opera" = "1" ]
 	then
-		screen -dmUS ech ./ech-server-linux -l ws://127.0.0.1:$wsport -f socks5://127.0.0.1:$operaport
+		screen -dmUS ech ./ech-tunnel-linux -l ws://127.0.0.1:$wsport -f socks5://127.0.0.1:$operaport
 	else
-		screen -dmUS ech ./ech-server-linux -l ws://127.0.0.1:$wsport
+		screen -dmUS ech ./ech-tunnel-linux -l ws://127.0.0.1:$wsport
 	fi
 else
 	if [ "$opera" = "1" ]
 	then
-		screen -dmUS ech ./ech-server-linux -l ws://127.0.0.1:$wsport -token $token -f socks5://127.0.0.1:$operaport
+		screen -dmUS ech ./ech-tunnel-linux -l ws://127.0.0.1:$wsport -token $token -f socks5://127.0.0.1:$operaport
 	else
-		screen -dmUS ech ./ech-server-linux -l ws://127.0.0.1:$wsport -token $token
+		screen -dmUS ech ./ech-tunnel-linux -l ws://127.0.0.1:$wsport -token $token
 	fi
 fi
 metricsport=$(get_free_port)
@@ -307,7 +307,7 @@ then
 	fi
 	done
 	clear
-	rm -rf cloudflared-linux ech-server-linux opera-linux
+	rm -rf cloudflared-linux ech-tunnel-linux opera-linux
 else
 	echo 退出成功
 	exit
