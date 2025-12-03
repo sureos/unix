@@ -16,5 +16,5 @@ apk update && apk add bash && wget https://raw.githubusercontent.com/sureos/unix
 
 ### ech
 ```shell
-wget https://raw.githubusercontent.com/sureos/unix/main/onekey-ech.sh -O onekey-ech.sh && chmod +x onekey-ech.sh && ./onekey-ech.sh
+wget https://raw.githubusercontent.com/sureos/unix/main/suoha-ech.sh -O suoha-ech.sh && chmod +x suoha-ech.sh && ./suoha-ech.sh
 ```
