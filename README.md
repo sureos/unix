@@ -18,3 +18,8 @@ apk update && apk add bash && wget https://raw.githubusercontent.com/sureos/unix
 ```shell
 wget https://raw.githubusercontent.com/sureos/unix/main/suoha-ech.sh -O suoha-ech.sh && chmod +x suoha-ech.sh && ./suoha-ech.sh
 ```
+
+### suoha-x
+```
+wget https://raw.githubusercontent.com/sureos/unix/main/suoha-x.sh -O suoha-x.sh && chmod +x suoha-x.sh && ./suoha-x.sh
+```
