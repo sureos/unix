@@ -169,49 +169,80 @@ check_network() {
 }
 
 # ─────────────────────────────────────────────
-# 获取 ISP 信息（替换失效的 speed.cloudflare.com/meta）
-# 根据实际使用的 IP 版本选择对应接口
+# 从 JSON 原始响应中解析并拼接 ISP 标识
+# 格式：country_city_ASasn_ipversion  例：JP_Tokyo_AS209557_IPv6
+# ─────────────────────────────────────────────
+_parse_isp() {
+    local raw="$1"
+    [ -z "$raw" ] && return 1
+
+    local country city asn ip_version
+    country=$(echo    "$raw" | grep -o '"country":"[^"]*"'    | cut -d'"' -f4)
+    city=$(echo       "$raw" | grep -o '"city":"[^"]*"'       | cut -d'"' -f4)
+    asn=$(echo        "$raw" | grep -o '"asn":[0-9]*'         | grep -o '[0-9]*')
+    ip_version=$(echo "$raw" | grep -o '"ip_version":"[^"]*"' | cut -d'"' -f4)
+
+    # city 可能含空格（如 "New York"），替换为下划线
+    city="${city// /_}"
+
+    [ -z "$country" ] && return 1
+
+    echo "${country:-XX}_${city:-Unknown}_AS${asn:-0}_${ip_version:-IP}"
+}
+
+# ─────────────────────────────────────────────
+# 获取 ISP 信息
+# 同时尝试 IPv4 和 IPv6 两个接口，各自独立拼接
+# isp      = 主要标识（根据 ips 选择）
+# isp_ipv4 = IPv4 出口标识（双栈时额外显示）
+# isp_ipv6 = IPv6 出口标识（双栈时额外显示）
 # ─────────────────────────────────────────────
 get_isp_info() {
-    local raw=""
-    local country asn colo
+    local raw4="" raw6="" parsed4="" parsed6=""
 
-    # 策略：
-    #   ips=6（含纯 IPv6 经 NAT64）→ 优先走 IPv6 接口（不加 -6 以兼容 NAT64）
-    #   ips=4                       → 只走 IPv4 接口
-    #   ips=auto（双栈）             → 先 IPv6 再 IPv4，反映实际出口
+    # ── 获取 IPv4 出口信息 ──
+    if [ "$HAS_IPV4" = true ]; then
+        raw4=$(curl -4 -s --max-time 8 https://ipv4-check-perf.radar.cloudflare.com/ 2>/dev/null)
+        parsed4=$(_parse_isp "$raw4")
+    fi
 
-    if [ "$ips" = "6" ]; then
-        # 纯 IPv6 / NAT64 环境：不加 -6，让系统按实际路由走（NAT64 下会走 IPv6）
-        raw=$(curl -s --max-time 8 https://ipv6-check-perf.radar.cloudflare.com/ 2>/dev/null)
-        # 如果通过 NAT64 DNS64 拿到的仍是 IPv4 接口响应也接受
-        [ -z "$raw" ] && raw=$(curl -s --max-time 8 https://ipv4-check-perf.radar.cloudflare.com/ 2>/dev/null)
-    elif [ "$ips" = "4" ]; then
-        raw=$(curl -4 -s --max-time 8 https://ipv4-check-perf.radar.cloudflare.com/ 2>/dev/null)
+    # ── 获取 IPv6 出口信息 ──
+    # NAT64 环境（HAS_IPV4=false, HAS_IPV6=true）也需要获取：
+    #   不加 -6/-4，让 DNS64+NAT64 自动路由；两个接口都尝试
+    if [ "$HAS_IPV6" = true ]; then
+        # 不加 -6 flag，兼容 NAT64：DNS64 会把 A 记录合成 AAAA，连接走 IPv6 socket
+        raw6=$(curl -s --max-time 8 https://ipv6-check-perf.radar.cloudflare.com/ 2>/dev/null)
+        parsed6=$(_parse_isp "$raw6")
+        # NAT64 下 ipv6-check-perf 可能返回 ip_version=IPv4（实际走了 NAT64），
+        # 再试一次带 -6 强制以确认
+        if [ -z "$parsed6" ]; then
+            raw6=$(curl -6 -s --max-time 8 https://ipv6-check-perf.radar.cloudflare.com/ 2>/dev/null)
+            parsed6=$(_parse_isp "$raw6")
+        fi
+    fi
+
+    # ── 根据 ips 选择主 isp 标识 ──
+    if [ "$ips" = "4" ]; then
+        isp="${parsed4:-Unknown_Unknown_AS0_IPv4}"
+    elif [ "$ips" = "6" ]; then
+        # 纯 IPv6 / NAT64：优先用 IPv6 接口结果
+        # NAT64 时 IPv6 接口可能拿不到，则尝试通过 NAT64 访问 IPv4 接口
+        if [ -z "$parsed6" ] && [ "$NAT64_APPLIED" = true ]; then
+            raw6=$(curl -s --max-time 8 https://ipv4-check-perf.radar.cloudflare.com/ 2>/dev/null)
+            parsed6=$(_parse_isp "$raw6")
+            # 如果从 IPv4 接口获取到但 ip_version 字段是 IPv4，手动改为标注 IPv6(NAT64)
+            [ -n "$parsed6" ] && parsed6="${parsed6%_*}_IPv6"
+        fi
+        isp="${parsed6:-Unknown_Unknown_AS0_IPv6}"
     else
-        # auto 双栈：先试 IPv6 接口再试 IPv4 接口
-        raw=$(curl -6 -s --max-time 8 https://ipv6-check-perf.radar.cloudflare.com/ 2>/dev/null)
-        [ -z "$raw" ] && raw=$(curl -4 -s --max-time 8 https://ipv4-check-perf.radar.cloudflare.com/ 2>/dev/null)
+        # auto 双栈：优先展示 IPv6 出口，拿不到用 IPv4
+        isp="${parsed6:-${parsed4:-Unknown_Unknown_AS0_Auto}}"
     fi
 
-    # 最终兜底
-    [ -z "$raw" ] && raw=$(curl -s --max-time 8 https://ipv4-check-perf.radar.cloudflare.com/ 2>/dev/null)
-
-    if [ -z "$raw" ]; then
-        warn "无法获取 ISP 信息，使用默认标识"
-        isp="VPS_AS0_XX"
-        return
-    fi
-
-    # JSON 字段解析：{"colo":"TPE","asn":209557,"country":"JP",...}
-    colo=$(echo    "$raw" | grep -o '"colo":"[^"]*"'    | cut -d'"' -f4)
-    asn=$(echo     "$raw" | grep -o '"asn":[0-9]*'      | grep -o '[0-9]*')
-    country=$(echo "$raw" | grep -o '"country":"[^"]*"' | cut -d'"' -f4)
-
-    # 拼接格式：机房代码_国家代码_AS编号  → 与原脚本 speed.cloudflare.com/meta 风格一致
-    # 例：TPE_JP_AS209557
-    isp="${colo:-VPS}_${country:-XX}_AS${asn:-0}"
-    ok "ISP 信息: $isp  （机房: ${colo:-?} | 国家: ${country:-?} | ASN: ${asn:-?}）"
+    # ── 输出信息 ──
+    ok "主要 ISP 标识: $isp"
+    [ -n "$parsed4" ] && [ "$parsed4" != "$isp" ] && info "IPv4 出口: $parsed4"
+    [ -n "$parsed6" ] && [ "$parsed6" != "$isp" ] && info "IPv6 出口: $parsed6"
 }
 
 # ─────────────────────────────────────────────
