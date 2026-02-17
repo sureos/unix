@@ -174,37 +174,44 @@ check_network() {
 # ─────────────────────────────────────────────
 get_isp_info() {
     local raw=""
-    local country asn city colo
+    local country asn colo
 
-    # 用户选了 IPv6，或纯 IPv6 环境 → 用 IPv6 接口获取出口信息
-    if [ "$ips" = "6" ] || ( [ "$ips" = "auto" ] && [ "$HAS_IPV6" = true ] ); then
-        raw=$(curl -6 -s --max-time 8 https://ipv6-check-perf.radar.cloudflare.com/ 2>/dev/null)
-    fi
+    # 策略：
+    #   ips=6（含纯 IPv6 经 NAT64）→ 优先走 IPv6 接口（不加 -6 以兼容 NAT64）
+    #   ips=4                       → 只走 IPv4 接口
+    #   ips=auto（双栈）             → 先 IPv6 再 IPv4，反映实际出口
 
-    # IPv4 优先 或 上面没拿到 → 用 IPv4 接口
-    if [ -z "$raw" ] && [ "$HAS_IPV4" = true ]; then
+    if [ "$ips" = "6" ]; then
+        # 纯 IPv6 / NAT64 环境：不加 -6，让系统按实际路由走（NAT64 下会走 IPv6）
+        raw=$(curl -s --max-time 8 https://ipv6-check-perf.radar.cloudflare.com/ 2>/dev/null)
+        # 如果通过 NAT64 DNS64 拿到的仍是 IPv4 接口响应也接受
+        [ -z "$raw" ] && raw=$(curl -s --max-time 8 https://ipv4-check-perf.radar.cloudflare.com/ 2>/dev/null)
+    elif [ "$ips" = "4" ]; then
         raw=$(curl -4 -s --max-time 8 https://ipv4-check-perf.radar.cloudflare.com/ 2>/dev/null)
+    else
+        # auto 双栈：先试 IPv6 接口再试 IPv4 接口
+        raw=$(curl -6 -s --max-time 8 https://ipv6-check-perf.radar.cloudflare.com/ 2>/dev/null)
+        [ -z "$raw" ] && raw=$(curl -4 -s --max-time 8 https://ipv4-check-perf.radar.cloudflare.com/ 2>/dev/null)
     fi
 
-    # 兜底（双栈 auto，先尝试 IPv6 没有再 IPv4）
-    if [ -z "$raw" ]; then
-        raw=$(curl -s --max-time 8 https://ipv4-check-perf.radar.cloudflare.com/ 2>/dev/null)
-    fi
+    # 最终兜底
+    [ -z "$raw" ] && raw=$(curl -s --max-time 8 https://ipv4-check-perf.radar.cloudflare.com/ 2>/dev/null)
 
     if [ -z "$raw" ]; then
         warn "无法获取 ISP 信息，使用默认标识"
-        isp="Unknown_AS0_VPS"
+        isp="VPS_AS0_XX"
         return
     fi
 
+    # JSON 字段解析：{"colo":"TPE","asn":209557,"country":"JP",...}
+    colo=$(echo    "$raw" | grep -o '"colo":"[^"]*"'    | cut -d'"' -f4)
+    asn=$(echo     "$raw" | grep -o '"asn":[0-9]*'      | grep -o '[0-9]*')
     country=$(echo "$raw" | grep -o '"country":"[^"]*"' | cut -d'"' -f4)
-    asn=$(echo "$raw"     | grep -o '"asn":[0-9]*'      | grep -o '[0-9]*')
-    city=$(echo "$raw"    | grep -o '"city":"[^"]*"'    | cut -d'"' -f4)
-    colo=$(echo "$raw"    | grep -o '"colo":"[^"]*"'    | cut -d'"' -f4)
 
-    local label="${city:-${colo:-VPS}}"
-    isp="${country:-XX}_AS${asn:-0}_${label// /_}"
-    ok "ISP 信息: $isp"
+    # 拼接格式：机房代码_国家代码_AS编号  → 与原脚本 speed.cloudflare.com/meta 风格一致
+    # 例：TPE_JP_AS209557
+    isp="${colo:-VPS}_${country:-XX}_AS${asn:-0}"
+    ok "ISP 信息: $isp  （机房: ${colo:-?} | 国家: ${country:-?} | ASN: ${asn:-?}）"
 }
 
 # ─────────────────────────────────────────────
@@ -291,8 +298,10 @@ EOF
 # ─────────────────────────────────────────────
 gen_links() {
     local outfile="$1" host="$2" uuid="$3" urlpath="$4" label="${5:-节点}"
-    local isp_name
+    local isp_name urlpath_encoded
     isp_name=$(echo "$isp" | sed -e 's/_/ /g')
+    # path 中的 / 需要 URL 编码为 %2F，否则部分客户端解析失败
+    urlpath_encoded=$(echo "$urlpath" | sed 's|/|%2F|g')
 
     {
     if [ "$protocol" = "1" ]; then
@@ -337,7 +346,7 @@ function quicktunnel(){
 
     local uuid port urlpath
     uuid=$(cat /proc/sys/kernel/random/uuid)
-    urlpath=$(echo "$uuid" | awk -F- '{print $1}')
+    urlpath="/$(echo "$uuid" | awk -F- '{print $1}')"
     port=$((RANDOM+10000))
 
     gen_xray_config xray/config.json "$port" "$uuid" "$urlpath"
@@ -396,7 +405,7 @@ function installtunnel(){
 
     local uuid port urlpath
     uuid=$(cat /proc/sys/kernel/random/uuid)
-    urlpath=$(echo "$uuid" | awk -F- '{print $1}')
+    urlpath="/$(echo "$uuid" | awk -F- '{print $1}')"
     port=$((RANDOM+10000))
 
     gen_xray_config /opt/suoha/config.json "$port" "$uuid" "$urlpath"
