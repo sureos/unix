@@ -172,77 +172,89 @@ check_network() {
 # 从 JSON 原始响应中解析并拼接 ISP 标识
 # 格式：country_city_ASasn_ipversion  例：JP_Tokyo_AS209557_IPv6
 # ─────────────────────────────────────────────
+# JSON 单字段提取：_json_val '{"key":"val"}' key  → val
+_json_val() {
+    echo "$1" | grep -o "\"$2\":[^,}]*" | cut -d':' -f2- | tr -d '"' | tr -d ' '
+}
+# JSON 字符串字段提取（值含空格也能处理）：_json_str '{"city":"New York"}' city → New York
+_json_str() {
+    echo "$1" | grep -o "\"$2\":\"[^\"]*\"" | cut -d'"' -f4
+}
+
+# ISP 标识拼接：格式 country_city_ASasn_ipversion  例：JP_Tokyo_AS209557_IPv6
 _parse_isp() {
     local raw="$1"
-    [ -z "$raw" ] && return 1
+    [ -z "$raw" ] && echo "" && return 1
 
     local country city asn ip_version
-    country=$(echo    "$raw" | grep -o '"country":"[^"]*"'    | cut -d'"' -f4)
-    city=$(echo       "$raw" | grep -o '"city":"[^"]*"'       | cut -d'"' -f4)
-    asn=$(echo        "$raw" | grep -o '"asn":[0-9]*'         | grep -o '[0-9]*')
-    ip_version=$(echo "$raw" | grep -o '"ip_version":"[^"]*"' | cut -d'"' -f4)
+    country=$(_json_str  "$raw" "country")
+    city=$(_json_str     "$raw" "city"       | sed 's/ /_/g')
+    asn=$(_json_val      "$raw" "asn")
+    ip_version=$(_json_str "$raw" "ip_version")
 
-    # city 可能含空格（如 "New York"），替换为下划线
-    city="${city// /_}"
+    # 必须有 country 才算有效响应
+    [ -z "$country" ] && echo "" && return 1
 
-    [ -z "$country" ] && return 1
-
-    echo "${country:-XX}_${city:-Unknown}_AS${asn:-0}_${ip_version:-IP}"
+    echo "${country}_${city:-Unknown}_AS${asn:-0}_${ip_version:-IP}"
 }
 
 # ─────────────────────────────────────────────
 # 获取 ISP 信息
-# 同时尝试 IPv4 和 IPv6 两个接口，各自独立拼接
-# isp      = 主要标识（根据 ips 选择）
-# isp_ipv4 = IPv4 出口标识（双栈时额外显示）
-# isp_ipv6 = IPv6 出口标识（双栈时额外显示）
+# - 纯 IPv4：只查 ipv4-check-perf
+# - 纯 IPv6（含 NAT64）：
+#     先查 ipv6-check-perf（需真实 IPv6 才有效）
+#     若失败，通过 NAT64 查 ipv4-check-perf，ip_version 修正为 IPv6(NAT64)
+# - 双栈：两个接口都查，各自展示
 # ─────────────────────────────────────────────
 get_isp_info() {
     local raw4="" raw6="" parsed4="" parsed6=""
 
-    # ── 获取 IPv4 出口信息 ──
+    # ── IPv4 出口 ──
     if [ "$HAS_IPV4" = true ]; then
+        info "获取 IPv4 出口信息..."
         raw4=$(curl -4 -s --max-time 8 https://ipv4-check-perf.radar.cloudflare.com/ 2>/dev/null)
         parsed4=$(_parse_isp "$raw4")
+        [ -n "$parsed4" ] && ok "IPv4 出口: $parsed4"
     fi
 
-    # ── 获取 IPv6 出口信息 ──
-    # NAT64 环境（HAS_IPV4=false, HAS_IPV6=true）也需要获取：
-    #   不加 -6/-4，让 DNS64+NAT64 自动路由；两个接口都尝试
+    # ── IPv6 出口 ──
     if [ "$HAS_IPV6" = true ]; then
-        # 不加 -6 flag，兼容 NAT64：DNS64 会把 A 记录合成 AAAA，连接走 IPv6 socket
-        raw6=$(curl -s --max-time 8 https://ipv6-check-perf.radar.cloudflare.com/ 2>/dev/null)
+        info "获取 IPv6 出口信息..."
+        # 优先强制 -6（真实双栈 / 真实 IPv6 环境）
+        raw6=$(curl -6 -s --max-time 8 https://ipv6-check-perf.radar.cloudflare.com/ 2>/dev/null)
         parsed6=$(_parse_isp "$raw6")
-        # NAT64 下 ipv6-check-perf 可能返回 ip_version=IPv4（实际走了 NAT64），
-        # 再试一次带 -6 强制以确认
+
+        # 若 -6 失败（NAT64 环境下 -6 强制走 IPv6 socket 但端点可能拒绝 NAT64 出口）
+        # 改为不指定协议，让 NAT64 路由自动处理
         if [ -z "$parsed6" ]; then
-            raw6=$(curl -6 -s --max-time 8 https://ipv6-check-perf.radar.cloudflare.com/ 2>/dev/null)
+            raw6=$(curl -s --max-time 8 https://ipv6-check-perf.radar.cloudflare.com/ 2>/dev/null)
             parsed6=$(_parse_isp "$raw6")
         fi
-    fi
 
-    # ── 根据 ips 选择主 isp 标识 ──
-    if [ "$ips" = "4" ]; then
-        isp="${parsed4:-Unknown_Unknown_AS0_IPv4}"
-    elif [ "$ips" = "6" ]; then
-        # 纯 IPv6 / NAT64：优先用 IPv6 接口结果
-        # NAT64 时 IPv6 接口可能拿不到，则尝试通过 NAT64 访问 IPv4 接口
+        # 还是失败 → NAT64 环境：通过 NAT64 访问 ipv4-check-perf，将 ip_version 标为 IPv6(NAT64)
         if [ -z "$parsed6" ] && [ "$NAT64_APPLIED" = true ]; then
+            info "IPv6 接口不可达，通过 NAT64 获取 IPv4 出口信息并标注..."
             raw6=$(curl -s --max-time 8 https://ipv4-check-perf.radar.cloudflare.com/ 2>/dev/null)
-            parsed6=$(_parse_isp "$raw6")
-            # 如果从 IPv4 接口获取到但 ip_version 字段是 IPv4，手动改为标注 IPv6(NAT64)
-            [ -n "$parsed6" ] && parsed6="${parsed6%_*}_IPv6"
+            local tmp
+            tmp=$(_parse_isp "$raw6")
+            if [ -n "$tmp" ]; then
+                # 把末尾的 _IPv4 替换为 _IPv6(NAT64)
+                parsed6="$(echo "$tmp" | sed 's/_IPv4$/_IPv6(NAT64)/')"
+            fi
         fi
-        isp="${parsed6:-Unknown_Unknown_AS0_IPv6}"
-    else
-        # auto 双栈：优先展示 IPv6 出口，拿不到用 IPv4
-        isp="${parsed6:-${parsed4:-Unknown_Unknown_AS0_Auto}}"
+
+        [ -n "$parsed6" ] && ok "IPv6 出口: $parsed6"
     fi
 
-    # ── 输出信息 ──
-    ok "主要 ISP 标识: $isp"
-    [ -n "$parsed4" ] && [ "$parsed4" != "$isp" ] && info "IPv4 出口: $parsed4"
-    [ -n "$parsed6" ] && [ "$parsed6" != "$isp" ] && info "IPv6 出口: $parsed6"
+    # ── 设置主 isp（用于节点备注）──
+    case "$ips" in
+        4)    isp="${parsed4:-XX_Unknown_AS0_IPv4}" ;;
+        6)    isp="${parsed6:-XX_Unknown_AS0_IPv6}" ;;
+        auto) isp="${parsed6:-${parsed4:-XX_Unknown_AS0_Auto}}" ;;
+        *)    isp="${parsed4:-${parsed6:-XX_Unknown_AS0_IP}}" ;;
+    esac
+
+    ok "节点标识: $isp"
 }
 
 # ─────────────────────────────────────────────
@@ -791,16 +803,18 @@ MGMT
 extra_tools_menu() {
     while true; do
         title "附加工具（可选安装）"
-        local has_opera=false has_warp=false
-        [ "$HAS_IPV4" = true ] && has_opera=true
-        has_warp=true   # 两种网络都可以装 WARP
-
-        [ "$has_opera" = true ] && echo "  1. opera-proxy  — 免费 Opera VPN HTTP 代理（需 IPv4）"
-        echo "  2. Cloudflare WARP — 提供额外出口 IP（IPv4/IPv6 均可安装）"
+        echo "  1. opera-proxy  — 免费 Opera VPN HTTP 代理（需要 IPv4）"
+        echo "  2. Cloudflare WARP — 提供额外出口 IP"
         echo "  0. 返回"
         read -rp "请选择 [默认0]: " extra; extra="${extra:-0}"
         case "$extra" in
-            1) [ "$has_opera" = true ] && install_opera_proxy || warn "当前网络不支持 opera-proxy" ;;
+            1)
+                if [ "$HAS_IPV4" = true ]; then
+                    install_opera_proxy
+                else
+                    warn "当前环境无 IPv4，opera-proxy 需要 IPv4 才能正常工作"
+                fi
+                ;;
             2) install_warp ;;
             0) break ;;
             *) warn "无效选项" ;;
@@ -836,6 +850,12 @@ echo "    0. 退出"
 echo ""
 read -rp "请选择 [默认1]: " mode; mode="${mode:-1}"
 
+# 选0立即退出，不再询问协议
+if [ "$mode" = "0" ]; then
+    ask_restore_nat64
+    exit 0
+fi
+
 echo ""
 echo "  ── 协议选择 ──"
 echo "    1. VMess"
@@ -845,14 +865,15 @@ read -rp "请选择 [默认1]: " protocol; protocol="${protocol:-1}"
 case "$mode" in
     1) quicktunnel ;;
     2) installtunnel ;;
-    0) ask_restore_nat64; exit 0 ;;
     *) warn "无效选项，使用快速模式"; quicktunnel ;;
 esac
 
 # 安装完成后，询问是否安装附加工具
 echo ""
 read -rp "是否安装附加工具（opera-proxy / WARP）？[y/N]: " showextra
-[ "${showextra,,}" = "y" ] && extra_tools_menu
+case "$showextra" in
+    y|Y) extra_tools_menu ;;
+esac
 
 # 最后询问是否恢复 NAT64 DNS
 ask_restore_nat64
