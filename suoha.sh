@@ -298,31 +298,33 @@ EOF
 # ─────────────────────────────────────────────
 gen_links() {
     local outfile="$1" host="$2" uuid="$3" urlpath="$4" label="${5:-节点}"
-    local isp_name urlpath_encoded
-    isp_name=$(echo "$isp" | sed -e 's/_/ /g')
-    # path 中的 / 需要 URL 编码为 %2F，否则部分客户端解析失败
-    urlpath_encoded=$(echo "$urlpath" | sed 's|/|%2F|g')
+    # isp_tag 用于节点备注：下划线分隔，不含空格，直接用于 URL fragment
+    local isp_tag
+    isp_tag="$isp"   # 已经是 COLO_CC_ASXXXX 格式，无需再处理
 
     {
     if [ "$protocol" = "1" ]; then
         echo -e "vmess 链接（$label）\n"
+        # vmess JSON 内 path 和 vless URL 中 path 均直接写 /xxx，不做编码
+        # query string 中 / 是合法字符（RFC3986），无需编码
         if [ "$OS_NAME" = "Alpine" ]; then
-            echo 'vmess://'$(echo '{"add":"lo.cafe","aid":"0","host":"'$host'","id":"'$uuid'","net":"ws","path":"'$urlpath'","port":"443","ps":"'"$isp_name"'_tls","tls":"tls","type":"none","v":"2"}' | base64 | awk '{ORS=(NR%76==0?RS:"");}1')
+            echo 'vmess://'$(echo '{"add":"lo.cafe","aid":"0","host":"'$host'","id":"'$uuid'","net":"ws","path":"'$urlpath'","port":"443","ps":"'$isp_tag'_tls","tls":"tls","type":"none","v":"2"}' | base64 | awk '{ORS=(NR%76==0?RS:"");}1')
         else
-            echo 'vmess://'$(echo '{"add":"lo.cafe","aid":"0","host":"'$host'","id":"'$uuid'","net":"ws","path":"'$urlpath'","port":"443","ps":"'"$isp_name"'_tls","tls":"tls","type":"none","v":"2"}' | base64 -w 0)
+            echo 'vmess://'$(echo '{"add":"lo.cafe","aid":"0","host":"'$host'","id":"'$uuid'","net":"ws","path":"'$urlpath'","port":"443","ps":"'$isp_tag'_tls","tls":"tls","type":"none","v":"2"}' | base64 -w 0)
         fi
         echo -e "\n端口 443 可改为 2053 2083 2087 2096 8443\n"
         if [ "$OS_NAME" = "Alpine" ]; then
-            echo 'vmess://'$(echo '{"add":"lo.cafe","aid":"0","host":"'$host'","id":"'$uuid'","net":"ws","path":"'$urlpath'","port":"80","ps":"'"$isp_name"'","tls":"","type":"none","v":"2"}' | base64 | awk '{ORS=(NR%76==0?RS:"");}1')
+            echo 'vmess://'$(echo '{"add":"lo.cafe","aid":"0","host":"'$host'","id":"'$uuid'","net":"ws","path":"'$urlpath'","port":"80","ps":"'$isp_tag'","tls":"","type":"none","v":"2"}' | base64 | awk '{ORS=(NR%76==0?RS:"");}1')
         else
-            echo 'vmess://'$(echo '{"add":"lo.cafe","aid":"0","host":"'$host'","id":"'$uuid'","net":"ws","path":"'$urlpath'","port":"80","ps":"'"$isp_name"'","tls":"","type":"none","v":"2"}' | base64 -w 0)
+            echo 'vmess://'$(echo '{"add":"lo.cafe","aid":"0","host":"'$host'","id":"'$uuid'","net":"ws","path":"'$urlpath'","port":"80","ps":"'$isp_tag'","tls":"","type":"none","v":"2"}' | base64 -w 0)
         fi
         echo -e "\n端口 80 可改为 8080 8880 2052 2082 2086 2095"
     else
         echo -e "vless 链接（$label）\n"
-        echo 'vless://'$uuid'@lo.cafe:443?encryption=none&security=tls&type=ws&host='$host'&path='$urlpath'#'$(echo "$isp_name" | sed -e 's/ /%20/g')'_tls'
+        # path 直接写 /xxx，不编码斜杠
+        echo 'vless://'$uuid'@lo.cafe:443?encryption=none&security=tls&type=ws&host='$host'&path='$urlpath'#'$isp_tag'_tls'
         echo -e "\n端口 443 可改为 2053 2083 2087 2096 8443\n"
-        echo 'vless://'$uuid'@lo.cafe:80?encryption=none&security=none&type=ws&host='$host'&path='$urlpath'#'$(echo "$isp_name" | sed -e 's/ /%20/g')
+        echo 'vless://'$uuid'@lo.cafe:80?encryption=none&security=none&type=ws&host='$host'&path='$urlpath'#'$isp_tag
         echo -e "\n端口 80 可改为 8080 8880 2052 2082 2086 2095"
     fi
     echo -e "\nlo.cafe 可替换为 CF 优选 IP"
